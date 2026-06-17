@@ -18,7 +18,9 @@ class Settings(BaseSettings):
     # CORS — frontend'in çalıştığı adresler
     cors_origins: list[str] = [
         "http://localhost:5173",
+        "http://178.105.184.196",
         "https://mesyosoft.com.tr",
+        "https://www.mesyosoft.com.tr",
         "https://*.mesyosoft.com.tr",
     ]
 

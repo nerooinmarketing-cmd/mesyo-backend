@@ -1,5 +1,8 @@
-﻿"""
-Performans/beceri takibi.
+"""
+Performans/beceri takibi. skills tablosunda institution_id NULL olan satırlar
+"global" (her kurum için ortak varsayılan beceriler) demektir; kurum kendi
+özel becerisini de ekleyebilir (institution_id kendi id'si olan satırlar).
+student_skills, (student_id, skill_id) çiftinde unique — upsert ile güncellenir.
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -12,7 +15,7 @@ router = APIRouter(prefix="/skills", tags=["skills"])
 class SkillLevelUpdate(BaseModel):
     student_id: str
     skill_id: str
-    level: str
+    level: str  # 'baslamadi' | 'basladi' | 'gelisiyor' | 'iyi' | 'mukemmel'
 
 
 class BulkLevelUpdate(BaseModel):
@@ -21,6 +24,7 @@ class BulkLevelUpdate(BaseModel):
 
 @router.get("")
 def list_skills(current: CurrentUser = Depends(require_institution)):
+    """Global beceriler (institution_id NULL) + bu kurumun kendi özel becerileri, sıralı."""
     sb = get_supabase()
     res = (
         sb.table("skills")
@@ -34,6 +38,8 @@ def list_skills(current: CurrentUser = Depends(require_institution)):
 
 @router.get("/classroom/{classroom_id}")
 def classroom_skill_levels(classroom_id: str, current: CurrentUser = Depends(require_institution)):
+    """Bir sınıftaki tüm öğrencilerin tüm becerilerdeki seviyelerini tek seferde döner —
+    PerformancePage'in tablosu bunu kullanır."""
     sb = get_supabase()
 
     cls_check = (
@@ -42,7 +48,7 @@ def classroom_skill_levels(classroom_id: str, current: CurrentUser = Depends(req
         .limit(1).execute()
     )
     if not cls_check.data:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Gecersiz sinif")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Geçersiz sınıf")
 
     students_res = (
         sb.table("students").select("id")
@@ -59,6 +65,7 @@ def classroom_skill_levels(classroom_id: str, current: CurrentUser = Depends(req
         .execute()
     )
 
+    # { student_id: { skill_id: level } } şeklinde, frontend'in perf state'iyle aynı şekil
     result: dict[str, dict[str, str]] = {}
     for row in levels_res.data:
         result.setdefault(row["student_id"], {})[row["skill_id"]] = row["level"]
@@ -67,11 +74,13 @@ def classroom_skill_levels(classroom_id: str, current: CurrentUser = Depends(req
 
 @router.post("/levels")
 def update_levels(body: BulkLevelUpdate, current: CurrentUser = Depends(require_institution)):
+    """Toplu kaydet — PerformancePage'deki 'Kaydet' butonu bunu çağırır."""
     sb = get_supabase()
 
     if not body.updates:
-        return {"detail": "Guncellenecek kayit yok"}
+        return {"detail": "Güncellenecek kayıt yok"}
 
+    # Öğrencilerin bu kuruma ait olduğunu doğrula (tek sorguda, tekrar tekrar değil)
     student_ids = list({u.student_id for u in body.updates})
     check = (
         sb.table("students").select("id")
@@ -81,7 +90,7 @@ def update_levels(body: BulkLevelUpdate, current: CurrentUser = Depends(require_
     valid_ids = {r["id"] for r in check.data}
     invalid = [sid for sid in student_ids if sid not in valid_ids]
     if invalid:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Bazi ogrenciler bu kuruma ait degil")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Bazı öğrenciler bu kuruma ait değil")
 
     rows = [
         {
@@ -93,4 +102,4 @@ def update_levels(body: BulkLevelUpdate, current: CurrentUser = Depends(require_
         for u in body.updates
     ]
     sb.table("student_skills").upsert(rows, on_conflict="student_id,skill_id").execute()
-    return {"detail": f"{len(rows)} kayit guncellendi"}
+    return {"detail": f"{len(rows)} kayıt güncellendi"}
