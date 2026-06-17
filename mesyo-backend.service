@@ -1,0 +1,15 @@
+[Unit]
+Description=Mesyo Soft Backend (FastAPI)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/mesyo-backend
+Environment="PATH=/opt/mesyo-backend/venv/bin"
+ExecStart=/opt/mesyo-backend/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8200 --workers 2
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
