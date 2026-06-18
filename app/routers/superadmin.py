@@ -27,6 +27,8 @@ class CreateInstitutionRequest(BaseModel):
     responsible_name: str
     responsible_phone: str
     email: str | None = None
+    student_limit: int = 150
+    subscription_status: str = "trial"
     admin_phone: str
     admin_password: str
 
