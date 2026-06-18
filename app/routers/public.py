@@ -29,6 +29,37 @@ class PublicRegisterRequest(BaseModel):
     kvkk: bool
 
 
+class InstitutionApplicationRequest(BaseModel):
+    name: str
+    city: str = "Konya"
+    district: str
+    address: str | None = None
+    responsible_name: str
+    responsible_phone: str
+    email: str | None = None
+    student_count_estimate: str | None = None
+    note: str | None = None
+    kvkk: bool
+
+
+@router.post("/institution-applications")
+def submit_institution_application(body: InstitutionApplicationRequest):
+    """Kurum/cami başvuru formu — herkese açık, oturum gerekmez.
+    Superadmin'in Başvurular sayfası bu tabloyu okur."""
+    if not body.kvkk:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "KVKK onayı zorunludur")
+
+    sb = get_supabase()
+    data = body.model_dump(exclude={"kvkk"})
+    data["kvkk_consent"] = True
+
+    from datetime import datetime, timezone
+    data["kvkk_consent_at"] = datetime.now(timezone.utc).isoformat()
+
+    res = sb.table("institution_applications").insert(data).execute()
+    return res.data[0]
+
+
 @router.get("/institution/{slug}")
 def institution_by_slug(slug: str):
     sb = get_supabase()
