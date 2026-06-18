@@ -53,6 +53,29 @@ def save_bulk(body: BulkSaveRequest, current: CurrentUser = Depends(require_inst
     return {"detail": f"{len(res.data)} kayıt işlendi"}
 
 
+@router.get("/dashboard-summary")
+def dashboard_summary(start: str, end: str, current: CurrentUser = Depends(require_institution)):
+    """Dashboard için — kurumun TÜM yoklama kayıtları, tarih aralığında, sınıf filtresi olmadan.
+    Bugünkü durum ve kronik devamsızlık hesaplaması frontend'de bu veriden türetilir."""
+    sb = get_supabase()
+    classroom_ids_res = (
+        sb.table("classrooms").select("id")
+        .eq("institution_id", current.institution_id)
+        .execute()
+    )
+    classroom_ids = [c["id"] for c in classroom_ids_res.data]
+    if not classroom_ids:
+        return []
+
+    res = (
+        sb.table("attendance_records").select("student_id, classroom_id, date, status")
+        .in_("classroom_id", classroom_ids)
+        .gte("date", start).lte("date", end)
+        .execute()
+    )
+    return res.data
+
+
 @router.get("/teacher-log")
 def teacher_log(start: str, end: str, current: CurrentUser = Depends(require_institution)):
     """Bir tarih aralığında, hangi öğretmenin hangi sınıfa hangi gün yoklama girdiğini özetler.
