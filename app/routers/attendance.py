@@ -53,6 +53,53 @@ def save_bulk(body: BulkSaveRequest, current: CurrentUser = Depends(require_inst
     return {"detail": f"{len(res.data)} kayıt işlendi"}
 
 
+@router.get("/teacher-log")
+def teacher_log(start: str, end: str, current: CurrentUser = Depends(require_institution)):
+    """Bir tarih aralığında, hangi öğretmenin hangi sınıfa hangi gün yoklama girdiğini özetler.
+    Her (classroom_id, date, marked_by) grubu için: kaç öğrenci işaretlendi, kaçı 'absent'.
+    Sınıf/öğretmen isimlerini ayrı sorgularla çekip Python'da birleştiriyoruz —
+    Supabase'in iç-içe foreign key disambiguation sentaksına bağımlı kalmamak için."""
+    sb = get_supabase()
+    res = (
+        sb.table("attendance_records")
+        .select("classroom_id, date, status, marked_by")
+        .gte("date", start).lte("date", end)
+        .execute()
+    )
+    if not res.data:
+        return []
+
+    classroom_ids = list({r["classroom_id"] for r in res.data})
+    teacher_ids = list({r["marked_by"] for r in res.data if r["marked_by"]})
+
+    classrooms_res = sb.table("classrooms").select("id, name").in_("id", classroom_ids).execute()
+    classroom_names = {c["id"]: c["name"] for c in classrooms_res.data}
+
+    teacher_names = {}
+    if teacher_ids:
+        teachers_res = sb.table("users").select("id, full_name").in_("id", teacher_ids).execute()
+        teacher_names = {t["id"]: t["full_name"] for t in teachers_res.data}
+
+    groups: dict[tuple, dict] = {}
+    for row in res.data:
+        key = (row["classroom_id"], row["date"], row["marked_by"])
+        if key not in groups:
+            groups[key] = {
+                "classroom_id": row["classroom_id"],
+                "date": row["date"],
+                "marked_by": row["marked_by"],
+                "classroom_name": classroom_names.get(row["classroom_id"], "—"),
+                "teacher_name": teacher_names.get(row["marked_by"], "—"),
+                "count": 0,
+                "absent": 0,
+            }
+        groups[key]["count"] += 1
+        if row["status"] == "absent":
+            groups[key]["absent"] += 1
+
+    return sorted(groups.values(), key=lambda g: g["date"], reverse=True)
+
+
 @router.get("")
 def get_by_date(classroom_id: str, date: str, current: CurrentUser = Depends(require_institution)):
     sb = get_supabase()
