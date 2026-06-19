@@ -62,3 +62,33 @@ def archive_season(season_id: str, current: CurrentUser = Depends(require_instit
     if not res.data:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Sezon bulunamadı")
     return res.data[0]
+
+
+class SeasonUpdate(BaseModel):
+    name: str
+
+
+@router.patch("/{season_id}")
+def update_season(season_id: str, body: SeasonUpdate, current: CurrentUser = Depends(require_institution)):
+    sb = get_supabase()
+    res = (
+        sb.table("seasons").update({"name": body.name})
+        .eq("id", season_id).eq("institution_id", current.institution_id)
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Sezon bulunamadı")
+    return res.data[0]
+
+
+@router.delete("/{season_id}")
+def delete_season(season_id: str, current: CurrentUser = Depends(require_institution)):
+    sb = get_supabase()
+    # Aktif sezonu silmeye izin verme
+    season_res = sb.table("seasons").select("is_active").eq("id", season_id).eq("institution_id", current.institution_id).limit(1).execute()
+    if not season_res.data:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Sezon bulunamadı")
+    if season_res.data[0]["is_active"]:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Aktif sezon silinemez. Önce arşivleyin.")
+    sb.table("seasons").delete().eq("id", season_id).eq("institution_id", current.institution_id).execute()
+    return {"detail": "Silindi"}
