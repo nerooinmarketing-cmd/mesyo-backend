@@ -65,3 +65,40 @@ def stats(current: CurrentUser = Depends(require_institution)):
         "classroom_count": classrooms.count or 0,
         "teacher_count": teachers.count or 0,
     }
+
+
+class AddressSettings(BaseModel):
+    allowed_districts: list[str] = []
+    allowed_mahalles: list[str] = []
+
+
+@router.get("/settings/address")
+def get_address_settings(current: CurrentUser = Depends(require_institution)):
+    sb = get_supabase()
+    res = (
+        sb.table("institutions")
+        .select("allowed_districts, allowed_mahalles, city, district")
+        .eq("id", current.institution_id)
+        .limit(1)
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Kurum bulunamadı")
+    return res.data[0]
+
+
+@router.patch("/settings/address")
+def update_address_settings(body: AddressSettings, current: CurrentUser = Depends(require_institution)):
+    sb = get_supabase()
+    res = (
+        sb.table("institutions")
+        .update({
+            "allowed_districts": body.allowed_districts,
+            "allowed_mahalles": body.allowed_mahalles,
+        })
+        .eq("id", current.institution_id)
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Kurum bulunamadı")
+    return {"detail": "Güncellendi", "allowed_districts": body.allowed_districts, "allowed_mahalles": body.allowed_mahalles}

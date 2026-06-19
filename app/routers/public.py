@@ -65,7 +65,7 @@ def institution_by_slug(slug: str):
     sb = get_supabase()
     res = (
         sb.table("institutions")
-        .select("id, name, city, is_active")
+        .select("id, name, city, district, is_active, allowed_districts, allowed_mahalles")
         .eq("slug", slug)
         .limit(1)
         .execute()
