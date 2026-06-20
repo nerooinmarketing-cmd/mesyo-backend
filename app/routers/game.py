@@ -355,7 +355,8 @@ def submit_answers(game_id: str, body: AnswerSubmit):
         "total_score": total_score,
         "student_name": student_name,
         "parent_name": parent_name,
-        "breakdown": breakdown
+        "breakdown": breakdown,
+        "correct_answers": {qid: info["correct"] for qid, info in correct_map.items()}
     }
 
 
