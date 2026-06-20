@@ -102,3 +102,37 @@ def update_address_settings(body: AddressSettings, current: CurrentUser = Depend
     if not res.data:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Kurum bulunamadı")
     return {"detail": "Güncellendi", "allowed_districts": body.allowed_districts, "allowed_mahalles": body.allowed_mahalles}
+
+
+@router.get("/payment-status")
+def get_payment_status(current: CurrentUser = Depends(require_institution)):
+    """Kurum yöneticisi panelinin ödeme uyarısı için — subscription durumu ve son ödeme bilgisi."""
+    sb = get_supabase()
+    inst = (
+        sb.table("institutions")
+        .select("subscription_status, subscription_expires_at, trial_ends_at, name")
+        .eq("id", current.institution_id)
+        .limit(1)
+        .execute()
+    )
+    if not inst.data:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Kurum bulunamadı")
+
+    data = inst.data[0]
+
+    # Son bekleyen ödeme kaydını da çek
+    pending_payment = (
+        sb.table("subscription_payments")
+        .select("id, due_date, amount, status, paid_at")
+        .eq("institution_id", current.institution_id)
+        .order("due_date", desc=True)
+        .limit(1)
+        .execute()
+    )
+
+    return {
+        "subscription_status": data["subscription_status"],
+        "subscription_expires_at": data["subscription_expires_at"],
+        "trial_ends_at": data["trial_ends_at"],
+        "latest_payment": pending_payment.data[0] if pending_payment.data else None,
+    }
