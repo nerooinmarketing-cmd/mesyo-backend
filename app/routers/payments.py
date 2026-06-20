@@ -17,6 +17,57 @@ class ConfirmPaymentRequest(BaseModel):
     extend_one_year: bool = True
 
 
+class CreatePaymentRequest(BaseModel):
+    institution_id: str
+    amount: float
+    due_date: str
+    note: str | None = None
+    mark_paid_now: bool = False  # Direkt ödendi olarak işaretle
+
+
+@router.post("/create")
+def create_payment(body: CreatePaymentRequest, current: CurrentUser = Depends(_superadmin_only)):
+    """Superadmin yeni ödeme kaydı oluşturur, isteğe bağlı olarak direkt ödendi işaretler."""
+    sb = get_supabase()
+    today = date.today().isoformat()
+
+    row = {
+        "institution_id": body.institution_id,
+        "amount": body.amount,
+        "due_date": body.due_date,
+        "note": body.note,
+        "status": "paid" if body.mark_paid_now else "pending",
+    }
+    if body.mark_paid_now:
+        row["paid_at"] = today
+        row["confirmed_by"] = current.id
+
+    res = sb.table("subscription_payments").insert(row).execute()
+    payment_id = res.data[0]["id"]
+
+    if body.mark_paid_now:
+        new_expiry = (date.today() + timedelta(days=365)).isoformat()
+        sb.table("institutions").update({
+            "subscription_status": "active",
+            "subscription_expires_at": new_expiry,
+        }).eq("id", body.institution_id).execute()
+
+    return res.data[0]
+
+
+@router.get("/institution/{institution_id}")
+def institution_payments(institution_id: str, current: CurrentUser = Depends(_superadmin_only)):
+    """Bir kurumun tüm ödeme geçmişi."""
+    sb = get_supabase()
+    res = (
+        sb.table("subscription_payments").select("*")
+        .eq("institution_id", institution_id)
+        .order("due_date", desc=True)
+        .execute()
+    )
+    return res.data
+
+
 @router.get("")
 def list_payments(status_filter: str | None = None, current: CurrentUser = Depends(_superadmin_only)):
     sb = get_supabase()
