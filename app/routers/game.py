@@ -20,6 +20,7 @@ class QuestionCreate(BaseModel):
     option_d: str
     correct_option: str  # A, B, C, D
     time_seconds: int = 30
+    points: int = 100   # Soru puanı — admin belirler
     hint: str | None = None
     explanation: str | None = None
 
@@ -29,14 +30,14 @@ class DailyGameCreate(BaseModel):
     question_id: str
     open_time: str = "20:00"
     close_time: str = "23:00"
-    password: str = ""
 
 
 class GameAnswer(BaseModel):
     participant_phone: str
     participant_name: str | None = None
-    chosen_option: str  # A, B, C, D
-    time_used: int  # saniye
+    player_type: str = "veli"  # veli | ogrenci
+    chosen_option: str
+    time_used: int
 
 
 # ── SORULAR ──────────────────────────────────────────────────────────────────
@@ -83,7 +84,6 @@ def delete_question(question_id: str, current: CurrentUser = Depends(require_ins
 
 @router.get("/calendar")
 def get_calendar(current: CurrentUser = Depends(require_institution)):
-    """Mevcut ayın tüm günlük oyunlarını döndür."""
     sb = get_supabase()
     res = (
         sb.table("daily_games")
@@ -98,7 +98,6 @@ def get_calendar(current: CurrentUser = Depends(require_institution)):
 @router.post("/calendar")
 def create_daily_game(body: DailyGameCreate, current: CurrentUser = Depends(require_institution)):
     sb = get_supabase()
-    # Aynı gün için zaten var mı?
     existing = (
         sb.table("daily_games")
         .select("id")
@@ -113,7 +112,7 @@ def create_daily_game(body: DailyGameCreate, current: CurrentUser = Depends(requ
         "question_ids": [body.question_id],
         "open_time": body.open_time,
         "close_time": body.close_time,
-        "password": body.password or "",
+        "password": "",
         "published_by": current.id,
     }
     if existing.data:
@@ -130,24 +129,47 @@ def delete_daily_game(game_id: str, current: CurrentUser = Depends(require_insti
     return {"detail": "Silindi"}
 
 
+# ── KATILIMCI LİSTESİ (toplu WhatsApp için) ──────────────────────────────────
+
+@router.get("/calendar/{game_id}/participants")
+def get_participants(game_id: str, current: CurrentUser = Depends(require_institution)):
+    """Admin toplu WhatsApp göndermek için katılımcı (veli) listesini alır."""
+    sb = get_supabase()
+    game_res = sb.table("daily_games").select("*").eq("id", game_id).eq("institution_id", current.institution_id).limit(1).execute()
+    if not game_res.data:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Oyun bulunamadı")
+    students = (
+        sb.table("students")
+        .select("id,first_name,last_name,parent_first_name,parent_last_name,parent_phone")
+        .eq("institution_id", current.institution_id)
+        .eq("status", "approved")
+        .execute()
+    )
+    return {"game": game_res.data[0], "students": students.data}
+
+
 # ── PUBLIC OYUN SAYFASI ──────────────────────────────────────────────────────
 
 @router.get("/play/{game_id}")
 def get_game_public(game_id: str):
-    """Katılımcı oyun sayfası için veri. Doğru cevabı gösterme."""
     sb = get_supabase()
-    res = sb.table("daily_games").select("*, game_questions(*)").eq("id", game_id).limit(1).execute()
+    res = sb.table("daily_games").select("*").eq("id", game_id).limit(1).execute()
     if not res.data:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Oyun bulunamadı")
     game = res.data[0]
 
-    # Soruyu bul
-    q_id = game["question_ids"][0] if game["question_ids"] else None
+    q_id = game["question_ids"][0] if game.get("question_ids") else None
     question = None
     if q_id:
-        q_res = sb.table("game_questions").select("id,question_text,option_a,option_b,option_c,option_d,time_seconds,hint").eq("id", q_id).limit(1).execute()
+        q_res = (
+            sb.table("game_questions")
+            .select("id,question_text,option_a,option_b,option_c,option_d,time_seconds,hint")
+            .eq("id", q_id)
+            .limit(1)
+            .execute()
+        )
         if q_res.data:
-            question = q_res.data[0]  # correct_option yok — hile olmasın
+            question = q_res.data[0]
 
     return {
         "id": game["id"],
@@ -161,17 +183,14 @@ def get_game_public(game_id: str):
 
 @router.post("/play/{game_id}/answer")
 def submit_answer(game_id: str, body: GameAnswer):
-    """Katılımcı cevabını kaydet."""
     sb = get_supabase()
 
-    # Oyunu bul
     game_res = sb.table("daily_games").select("*").eq("id", game_id).limit(1).execute()
     if not game_res.data:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Oyun bulunamadı")
     game = game_res.data[0]
 
-    # Soruyu ve doğru cevabı bul
-    q_id = game["question_ids"][0] if game["question_ids"] else None
+    q_id = game["question_ids"][0] if game.get("question_ids") else None
     if not q_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Soru bulunamadı")
 
@@ -181,15 +200,16 @@ def submit_answer(game_id: str, body: GameAnswer):
 
     question = q_res.data[0]
     correct = question["correct_option"].upper()
-    chosen = body.chosen_option.upper()
+    chosen = body.chosen_option.upper() if body.chosen_option != "TIMEOUT" else "X"
     is_correct = chosen == correct
 
-    # Puan hesapla: doğruysa 100 puan + hız bonusu
+    # Puan: doğruysa 100 + hız bonusu, veliye 1.5x çarpan
     score = 0
     if is_correct:
         max_time = question["time_seconds"]
         time_bonus = max(0, int((1 - body.time_used / max_time) * 50))
-        score = 100 + time_bonus
+        base = 100 + time_bonus
+        score = int(base * 1.5) if body.player_type == "veli" else base
 
     # Öğrenciyi telefon numarasından bul
     student_res = (
@@ -201,9 +221,11 @@ def submit_answer(game_id: str, body: GameAnswer):
         .execute()
     )
     student_id = student_res.data[0]["id"] if student_res.data else None
-    student_name = f"{student_res.data[0]['first_name']} {student_res.data[0]['last_name']}" if student_res.data else body.participant_name or body.participant_phone
+    student_name = (
+        f"{student_res.data[0]['first_name']} {student_res.data[0]['last_name']}"
+        if student_res.data else (body.participant_name or body.participant_phone)
+    )
 
-    # Session kaydet (upsert — aynı oyuna iki kez girilmesin)
     if student_id:
         existing = (
             sb.table("game_sessions")
@@ -214,39 +236,27 @@ def submit_answer(game_id: str, body: GameAnswer):
             .execute()
         )
         if existing.data:
-            return {
-                "already_played": True,
-                "is_correct": is_correct,
-                "correct_option": correct,
-                "score": score,
-                "student_name": student_name,
-            }
+            return {"already_played": True, "is_correct": is_correct, "correct_option": correct, "score": score, "student_name": student_name}
 
         sb.table("game_sessions").insert({
             "institution_id": game["institution_id"],
             "daily_game_id": game_id,
             "student_id": student_id,
             "child_answers": [{"questionId": q_id, "chosen": chosen, "timeUsed": body.time_used, "correct": is_correct}],
+            "parent_answers": [] if body.player_type == "ogrenci" else [{"questionId": q_id, "chosen": chosen, "timeUsed": body.time_used, "correct": is_correct}],
             "total_score": score,
-            "score_breakdown": [{"questionId": q_id, "score": score}],
+            "score_breakdown": [{"questionId": q_id, "score": score, "playerType": body.player_type}],
         }).execute()
 
-    return {
-        "already_played": False,
-        "is_correct": is_correct,
-        "correct_option": correct,
-        "score": score,
-        "student_name": student_name,
-    }
+    return {"already_played": False, "is_correct": is_correct, "correct_option": correct, "score": score, "student_name": student_name}
 
 
 @router.get("/play/{game_id}/leaderboard")
 def get_leaderboard(game_id: str):
-    """Puan tablosu — herkese açık."""
     sb = get_supabase()
     res = (
         sb.table("game_sessions")
-        .select("total_score, student_id, students(first_name, last_name)")
+        .select("total_score,student_id,students(first_name,last_name)")
         .eq("daily_game_id", game_id)
         .order("total_score", desc=True)
         .execute()
