@@ -6,7 +6,7 @@ Frontend'in .env'indeki VITE_API_URL bu sunucunun /api yoluna işaret etmeli.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.routers import auth, students, classrooms, teachers, seasons, attendance, superadmin, institution, public, assignments, skills, applications, payments, modules, users, assets, accounting
+from app.routers import auth, students, classrooms, teachers, seasons, attendance, superadmin, institution, public, assignments, skills, applications, payments, modules, users, assets, accounting, game
 
 app = FastAPI(title="Mesyo Soft API", version="1.0.0")
 
@@ -39,6 +39,7 @@ api_app.include_router(modules.router)
 api_app.include_router(users.router)
 api_app.include_router(assets.router)
 api_app.include_router(accounting.router)
+api_app.include_router(game.router)
 
 app.mount("/api", api_app)
 

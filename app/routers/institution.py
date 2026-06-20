@@ -136,3 +136,26 @@ def get_payment_status(current: CurrentUser = Depends(require_institution)):
         "trial_ends_at": data["trial_ends_at"],
         "latest_payment": pending_payment.data[0] if pending_payment.data else None,
     }
+
+
+@router.get("/notification-logs")
+def get_notification_logs(current: CurrentUser = Depends(require_institution)):
+    """Kurumun bildirim geçmişi."""
+    sb = get_supabase()
+    res = (
+        sb.table("notification_logs")
+        .select("*, students(first_name, last_name), users!sent_by(full_name)")
+        .eq("institution_id", current.institution_id)
+        .order("sent_at", desc=True)
+        .limit(100)
+        .execute()
+    )
+    # Flatten joins
+    result = []
+    for row in res.data:
+        student = row.pop("students", None) or {}
+        sender = row.pop("users", None) or {}
+        row["student_name"] = f"{student.get('first_name','')} {student.get('last_name','')}".strip() or "—"
+        row["sender_name"] = sender.get("full_name", "Sistem")
+        result.append(row)
+    return result
