@@ -1,10 +1,11 @@
 """
 Ön Muhasebe — Kasalar ve Gelir/Gider kayıtları.
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from pydantic import BaseModel
 from app.core.supabase import get_supabase
 from app.core.deps import require_institution, CurrentUser
+import uuid
 
 router = APIRouter(prefix="/accounting", tags=["accounting"])
 
@@ -33,6 +34,7 @@ class EntryCreate(BaseModel):
     donor_name: str | None = None
     entry_date: str
     note: str | None = None
+    receipt_url: str | None = None
 
 
 class EntryUpdate(BaseModel):
@@ -127,9 +129,46 @@ def create_entry(body: EntryCreate, current: CurrentUser = Depends(require_insti
         "donor_name": body.donor_name,
         "entry_date": body.entry_date,
         "note": body.note,
+        "receipt_url": body.receipt_url,
         "created_by": current.id,
     }).execute()
     return res.data[0]
+
+
+@router.post("/entries/{entry_id}/receipt")
+async def upload_receipt(
+    entry_id: str,
+    file: UploadFile = File(...),
+    current: CurrentUser = Depends(require_institution),
+):
+    """Fiş/makbuz fotoğrafı yükle."""
+    sb = get_supabase()
+    # Entry bu kuruma ait mi?
+    entry = sb.table("accounting_entries").select("id").eq("id", entry_id).eq("institution_id", current.institution_id).limit(1).execute()
+    if not entry.data:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Hareket bulunamadı")
+
+    # Dosyayı oku
+    contents = await file.read()
+    ext = file.filename.split(".")[-1].lower() if "." in file.filename else "jpg"
+    file_name = f"receipts/{current.institution_id}/{entry_id}.{ext}"
+
+    try:
+        # Supabase Storage'a yükle
+        sb.storage.from_("accounting").upload(
+            path=file_name,
+            file=contents,
+            file_options={"content-type": file.content_type or "image/jpeg", "upsert": "true"}
+        )
+        # Public URL al
+        url_res = sb.storage.from_("accounting").get_public_url(file_name)
+        receipt_url = url_res if isinstance(url_res, str) else url_res.get("publicUrl", "")
+    except Exception as e:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Dosya yükleme hatası: {str(e)}")
+
+    # Entry'yi güncelle
+    sb.table("accounting_entries").update({"receipt_url": receipt_url}).eq("id", entry_id).execute()
+    return {"receipt_url": receipt_url}
 
 
 @router.patch("/entries/{entry_id}")
