@@ -37,6 +37,7 @@ class DailyGameCreate(BaseModel):
 class AnswerSubmit(BaseModel):
     game_id: str
     parent_phone: str
+    player_name: str | None = None
     child_answers: list[dict]   # [{question_index, chosen, time_used}]
     parent_answers: list[dict]  # [{question_index, chosen, time_used}]
 
@@ -311,7 +312,7 @@ def submit_answers(game_id: str, body: AnswerSubmit):
     )
     
     student_id = None
-    student_name = body.parent_phone
+    student_name = body.player_name or body.parent_phone or "Misafir"
     parent_name = ""
     
     if student_res.data:
