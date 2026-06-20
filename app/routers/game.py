@@ -221,7 +221,19 @@ def verify_password(game_id: str, body: dict):
             student_name = f"{s['first_name']} {s['last_name']}"
             parent_name = f"{s['parent_first_name']} {s['parent_last_name']}"
     
-    return {"correct": True, "student_name": student_name, "parent_name": parent_name}
+    # Doğru cevapları al
+    game_res = sb.table("daily_games").select("question_ids").eq("id", game_id).limit(1).execute()
+    correct_answers = {}
+    if game_res.data:
+        for qid in (game_res.data[0].get("question_ids") or []):
+            qres = sb.table("game_questions").select("id,correct_option,hint").eq("id", qid).limit(1).execute()
+            if qres.data:
+                correct_answers[qid] = {
+                    "correct": qres.data[0]["correct_option"].upper(),
+                    "player_type": qres.data[0].get("hint", "child")
+                }
+
+    return {"correct": True, "student_name": student_name, "parent_name": parent_name, "correct_answers": correct_answers}
 
 
 @router.post("/play/{game_id}/submit")
