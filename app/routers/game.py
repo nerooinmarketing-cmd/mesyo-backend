@@ -87,7 +87,7 @@ def get_calendar(current: CurrentUser = Depends(require_institution)):
     sb = get_supabase()
     res = (
         sb.table("daily_games")
-        .select("*, game_questions(*)")
+        .select("*")
         .eq("institution_id", current.institution_id)
         .order("game_date")
         .execute()
