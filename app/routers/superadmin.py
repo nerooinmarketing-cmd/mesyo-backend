@@ -205,3 +205,31 @@ def impersonate(institution_id: str, current: CurrentUser = Depends(_superadmin_
             "is_active": admin["is_active"],
         },
     }
+
+
+@router.get("/settings")
+def get_settings(_: CurrentUser = Depends(require_superadmin)):
+    sb = get_supabase()
+    res = sb.table("system_settings").select("key,value").execute()
+    return res.data or []
+
+
+@router.post("/settings")
+def save_settings(body: list, _: CurrentUser = Depends(require_superadmin)):
+    sb = get_supabase()
+    for item in body:
+        sb.table("system_settings").upsert(
+            {"key": item["key"], "value": item["value"], "updated_at": "now()"},
+            on_conflict="key"
+        ).execute()
+    return {"detail": "Kaydedildi"}
+
+
+@router.get("/settings/public")
+def get_public_settings():
+    """Kurumların erişebileceği ödeme bilgileri"""
+    sb = get_supabase()
+    res = sb.table("system_settings").select("key,value").in_("key", [
+        "payment_iban", "payment_bank", "payment_name", "payment_amount", "payment_note"
+    ]).execute()
+    return {item["key"]: item["value"] for item in (res.data or [])}
