@@ -233,3 +233,17 @@ def get_public_settings():
         "payment_iban", "payment_bank", "payment_name", "payment_amount", "payment_note"
     ]).execute()
     return {item["key"]: item["value"] for item in (res.data or [])}
+
+
+@router.delete("/institutions/{institution_id}")
+def delete_institution(institution_id: str, _: CurrentUser = Depends(require_role("superadmin"))):
+    sb = get_supabase()
+    sb.table("institutions").delete().eq("id", institution_id).execute()
+    return {"detail": "Kurum silindi"}
+
+
+@router.delete("/applications/{application_id}")
+def delete_application(application_id: str, _: CurrentUser = Depends(require_role("superadmin"))):
+    sb = get_supabase()
+    sb.table("institution_applications").delete().eq("id", application_id).execute()
+    return {"detail": "Başvuru silindi"}
