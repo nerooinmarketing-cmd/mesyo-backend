@@ -159,3 +159,41 @@ def get_notification_logs(current: CurrentUser = Depends(require_institution)):
         row["sender_name"] = sender.get("full_name", "Sistem")
         result.append(row)
     return result
+
+
+# ── ETKİNLİK TAKVİMİ ─────────────────────────────────────────────────────────
+
+@router.get("/events")
+def list_events(current: CurrentUser = Depends(require_institution)):
+    sb = get_supabase()
+    res = sb.table("calendar_events").select("*").eq("institution_id", current.institution_id).order("event_date").execute()
+    return res.data or []
+
+
+@router.post("/events")
+def create_event(body: dict, current: CurrentUser = Depends(require_institution)):
+    sb = get_supabase()
+    res = sb.table("calendar_events").insert({
+        "institution_id": current.institution_id,
+        "title": body.get("title"),
+        "event_date": body.get("event_date"),
+        "description": body.get("description"),
+        "event_type_id": body.get("event_type_id"),
+        "created_by": current.id,
+    }).execute()
+    return res.data[0]
+
+
+@router.delete("/events/{event_id}")
+def delete_event(event_id: str, current: CurrentUser = Depends(require_institution)):
+    sb = get_supabase()
+    sb.table("calendar_events").delete().eq("id", event_id).eq("institution_id", current.institution_id).execute()
+    return {"detail": "Silindi"}
+
+
+@router.patch("/events/{event_id}")
+def update_event(event_id: str, body: dict, current: CurrentUser = Depends(require_institution)):
+    sb = get_supabase()
+    data = {k: v for k, v in body.items() if k in ("title", "event_date", "description", "event_type_id")}
+    res = sb.table("calendar_events").update(data).eq("id", event_id).eq("institution_id", current.institution_id).execute()
+    return res.data[0] if res.data else {}
