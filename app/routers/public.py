@@ -108,6 +108,7 @@ def public_register(slug: str, body: PublicRegisterRequest):
     data["registration_source"] = "form"
     data["kvkk_consent"] = True
     data["full_name"] = f"{body.first_name} {body.last_name}".strip()
+    data["parent_name"] = f"{body.parent_first_name} {body.parent_last_name}".strip()
 
     res = sb.table("students").insert(data).execute()
     return res.data[0]
