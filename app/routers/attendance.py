@@ -251,3 +251,76 @@ def update_lesson_time(classroom_id: str, body: dict, current: CurrentUser = Dep
         "lesson_end_time": body.get("lesson_end_time"),
     }).eq("id", classroom_id).eq("institution_id", current.institution_id).execute()
     return {"detail": "Ders saati güncellendi"}
+
+
+@router.get("/late-report/student/{student_id}")
+def late_report_student(student_id: str, current: CurrentUser = Depends(require_institution)):
+    """Öğrenci bazlı geç gelme raporu"""
+    sb = get_supabase()
+
+    # Öğrenci kontrolü
+    st = sb.table("students").select("id,first_name,last_name,parent_name,parent_phone,classroom_id").eq("id", student_id).eq("institution_id", current.institution_id).limit(1).execute()
+    if not st.data:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Öğrenci bulunamadı")
+    student = st.data[0]
+
+    # Geç gelme kayıtları
+    res = sb.table("attendance_records").select("date,arrival_time,is_late,status").eq("student_id", student_id).eq("is_late", True).order("date", desc=True).execute()
+    late_records = res.data or []
+
+    # Tüm yoklama sayısı
+    all_res = sb.table("attendance_records").select("status").eq("student_id", student_id).execute()
+    all_records = all_res.data or []
+    total_present = sum(1 for r in all_records if r["status"] == "present")
+
+    return {
+        "student": student,
+        "late_count": len(late_records),
+        "total_present": total_present,
+        "late_rate": round(len(late_records) / total_present * 100, 1) if total_present else 0,
+        "records": late_records,
+    }
+
+
+@router.get("/late-report/all")
+def late_report_all(start: str, end: str, current: CurrentUser = Depends(require_institution)):
+    """Tüm kurum öğrencileri geç gelme raporu — öğrenci bazlı"""
+    sb = get_supabase()
+
+    # Kurumun tüm sınıfları
+    cls_res = sb.table("classrooms").select("id").eq("institution_id", current.institution_id).execute()
+    cls_ids = [c["id"] for c in (cls_res.data or [])]
+    if not cls_ids:
+        return {"students": [], "total": 0}
+
+    # Geç gelme kayıtları
+    res = sb.table("attendance_records").select(
+        "student_id, date, arrival_time, classroom_id"
+    ).in_("classroom_id", cls_ids).eq("is_late", True).gte("date", start).lte("date", end).execute()
+
+    late_records = res.data or []
+    student_ids = list({r["student_id"] for r in late_records})
+
+    students_map = {}
+    if student_ids:
+        sts = sb.table("students").select("id,first_name,last_name,parent_name,parent_phone").in_("id", student_ids).execute()
+        students_map = {s["id"]: s for s in (sts.data or [])}
+
+    grouped: dict = {}
+    for r in late_records:
+        sid = r["student_id"]
+        if sid not in grouped:
+            s = students_map.get(sid, {})
+            grouped[sid] = {
+                "student_id": sid,
+                "full_name": f"{s.get('first_name','')} {s.get('last_name','')}".strip(),
+                "parent_name": s.get("parent_name", ""),
+                "parent_phone": s.get("parent_phone", ""),
+                "late_count": 0,
+                "records": [],
+            }
+        grouped[sid]["late_count"] += 1
+        grouped[sid]["records"].append({"date": r["date"], "arrival_time": r["arrival_time"]})
+
+    result = sorted(grouped.values(), key=lambda x: x["late_count"], reverse=True)
+    return {"students": result, "total": len(late_records)}
