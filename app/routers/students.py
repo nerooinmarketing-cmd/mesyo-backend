@@ -144,8 +144,6 @@ def bulk_import_students(body: BulkStudentCreate, current: CurrentUser = Depends
     sb = get_supabase()
     if not body.students:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Öğrenci listesi boş")
-    if len(body.students) > 200:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "En fazla 200 öğrenci yüklenebilir")
 
     # Aktif sezonu bul
     season_id = body.season_id
