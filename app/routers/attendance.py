@@ -13,6 +13,8 @@ router = APIRouter(prefix="/attendance", tags=["attendance"])
 class AttendanceEntry(BaseModel):
     student_id: str
     status: str  # 'present' | 'absent' | 'late' | 'excused'
+    arrival_time: str | None = None  # 'HH:MM'
+    is_late: bool = False
 
 
 class BulkSaveRequest(BaseModel):
@@ -27,28 +29,34 @@ def save_bulk(body: BulkSaveRequest, current: CurrentUser = Depends(require_inst
 
     # Sınıfın bu kuruma ait olduğunu doğrula
     cls_check = (
-        sb.table("classrooms").select("id")
+        sb.table("classrooms").select("id,lesson_start_time")
         .eq("id", body.classroom_id).eq("institution_id", current.institution_id)
         .limit(1).execute()
     )
     if not cls_check.data:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Geçersiz sınıf")
 
-    rows = [
-        {
+    lesson_start = cls_check.data[0].get("lesson_start_time")
+
+    rows = []
+    for e in body.entries:
+        is_late = e.is_late
+        # Eğer geliş saati ve ders başlangıç saati varsa otomatik hesapla
+        if e.arrival_time and lesson_start and e.status == "present":
+            is_late = e.arrival_time > lesson_start[:5]
+        rows.append({
             "student_id": e.student_id,
             "classroom_id": body.classroom_id,
             "date": body.date,
             "status": e.status,
+            "arrival_time": e.arrival_time,
+            "is_late": is_late,
             "marked_by": current.id,
-        }
-        for e in body.entries
-    ]
+        })
+
     if not rows:
         return {"detail": "Kayıt yok"}
 
-    # upsert: (student_id, date) unique constraint'i sayesinde aynı güne tekrar
-    # yoklama alınırsa üzerine yazar.
     res = sb.table("attendance_records").upsert(rows, on_conflict="student_id,date").execute()
     return {"detail": f"{len(res.data)} kayıt işlendi"}
 
@@ -177,3 +185,69 @@ def student_summary(student_id: str, current: CurrentUser = Depends(require_inst
         "rate": round(present / total * 100, 1) if total else 0,
         "records": records,
     }
+
+
+@router.get("/late-report")
+def late_report(classroom_id: str, start: str, end: str, current: CurrentUser = Depends(require_institution)):
+    """Geç gelen öğrenciler raporu"""
+    sb = get_supabase()
+
+    # Sınıf kontrolü
+    cls_check = sb.table("classrooms").select("id,name,lesson_start_time,lesson_end_time").eq("id", classroom_id).eq("institution_id", current.institution_id).limit(1).execute()
+    if not cls_check.data:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Geçersiz sınıf")
+    cls = cls_check.data[0]
+
+    # Geç gelen kayıtlar
+    res = sb.table("attendance_records").select(
+        "student_id, date, arrival_time, is_late, status"
+    ).eq("classroom_id", classroom_id).eq("is_late", True).gte("date", start).lte("date", end).execute()
+
+    late_records = res.data or []
+
+    # Öğrenci bilgilerini çek
+    student_ids = list({r["student_id"] for r in late_records})
+    students_map = {}
+    if student_ids:
+        sts = sb.table("students").select("id,first_name,last_name,parent_name,parent_phone").in_("id", student_ids).execute()
+        students_map = {s["id"]: s for s in (sts.data or [])}
+
+    # Öğrenci bazında grupla
+    grouped: dict = {}
+    for r in late_records:
+        sid = r["student_id"]
+        if sid not in grouped:
+            s = students_map.get(sid, {})
+            grouped[sid] = {
+                "student_id": sid,
+                "full_name": f"{s.get('first_name','')} {s.get('last_name','')}".strip(),
+                "parent_name": s.get("parent_name", ""),
+                "parent_phone": s.get("parent_phone", ""),
+                "late_count": 0,
+                "records": [],
+            }
+        grouped[sid]["late_count"] += 1
+        grouped[sid]["records"].append({
+            "date": r["date"],
+            "arrival_time": r["arrival_time"],
+        })
+
+    result = sorted(grouped.values(), key=lambda x: x["late_count"], reverse=True)
+
+    return {
+        "classroom": cls,
+        "period": {"start": start, "end": end},
+        "total_late_records": len(late_records),
+        "students": result,
+    }
+
+
+@router.patch("/classrooms/{classroom_id}/lesson-time")
+def update_lesson_time(classroom_id: str, body: dict, current: CurrentUser = Depends(require_institution)):
+    """Sınıf ders saatini güncelle"""
+    sb = get_supabase()
+    sb.table("classrooms").update({
+        "lesson_start_time": body.get("lesson_start_time"),
+        "lesson_end_time": body.get("lesson_end_time"),
+    }).eq("id", classroom_id).eq("institution_id", current.institution_id).execute()
+    return {"detail": "Ders saati güncellendi"}
