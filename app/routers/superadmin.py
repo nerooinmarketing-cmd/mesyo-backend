@@ -208,14 +208,14 @@ def impersonate(institution_id: str, current: CurrentUser = Depends(_superadmin_
 
 
 @router.get("/settings")
-def get_settings(_: CurrentUser = Depends(require_superadmin)):
+def get_settings(_: CurrentUser = Depends(require_role("superadmin"))):
     sb = get_supabase()
     res = sb.table("system_settings").select("key,value").execute()
     return res.data or []
 
 
 @router.post("/settings")
-def save_settings(body: list, _: CurrentUser = Depends(require_superadmin)):
+def save_settings(body: list, _: CurrentUser = Depends(require_role("superadmin"))):
     sb = get_supabase()
     for item in body:
         sb.table("system_settings").upsert(
