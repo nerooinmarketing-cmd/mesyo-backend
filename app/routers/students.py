@@ -120,10 +120,16 @@ class BulkStudentItem(BaseModel):
     full_name: str | None = None
     birth_date: str | None = None
     gender: str = "kiz"
-    parent_name: str
-    parent_phone: str
+    age: int | None = None
     tc_no: str | None = None
+    address: str | None = None
     mahalle: str | None = None
+    parent_name: str
+    parent_first_name: str | None = None
+    parent_last_name: str | None = None
+    parent_address: str | None = None
+    parent_phone: str
+    registration_date: str | None = None
     classroom_id: str | None = None
     season_id: str | None = None
 
@@ -169,17 +175,19 @@ def bulk_import_students(body: BulkStudentCreate, current: CurrentUser = Depends
             "status": "approved",
             "registration_source": "excel",
             "kvkk_consent": True,
+            "registration_date": s.registration_date or __import__("datetime").date.today().isoformat(),
         }
-        if s.birth_date:
-            row["birth_date"] = s.birth_date
-        if s.tc_no:
-            row["tc_no"] = s.tc_no
-        if s.mahalle:
-            row["mahalle"] = s.mahalle
-        if s.classroom_id:
-            row["classroom_id"] = s.classroom_id
-        if season_id:
-            row["season_id"] = season_id
+        if s.birth_date: row["birth_date"] = s.birth_date
+        if s.tc_no: row["tc_no"] = s.tc_no
+        if s.age: row["age"] = s.age
+        if s.address: row["address"] = s.address
+        if s.mahalle: row["mahalle"] = s.mahalle
+        if s.parent_first_name: row["parent_first_name"] = s.parent_first_name
+        if s.parent_last_name: row["parent_last_name"] = s.parent_last_name
+        if s.parent_address: row["parent_address"] = s.parent_address
+        if s.registration_date: row["registration_date"] = s.registration_date
+        if s.classroom_id: row["classroom_id"] = s.classroom_id
+        if season_id: row["season_id"] = season_id
         rows.append(row)
 
     if errors:
