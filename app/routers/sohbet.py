@@ -73,6 +73,10 @@ def delete_sohbet(sohbet_id: str, current: CurrentUser = Depends(require_institu
 @router.get("/list/{sohbet_id}/kayitlar")
 def get_kayitlar(sohbet_id: str, current: CurrentUser = Depends(require_institution)):
     sb = get_supabase()
+    # Sohbetin bu kuruma ait olduğunu doğrula
+    sohbet_check = sb.table("sohbets").select("id").eq("id", sohbet_id).eq("institution_id", current.institution_id).limit(1).execute()
+    if not sohbet_check.data:
+        return []
     res = (
         sb.table("sohbet_kayitlar")
         .select("*")

@@ -138,6 +138,10 @@ def teacher_log(start: str, end: str, current: CurrentUser = Depends(require_ins
 @router.get("")
 def get_by_date(classroom_id: str, date: str, current: CurrentUser = Depends(require_institution)):
     sb = get_supabase()
+    # Sınıfın bu kuruma ait olduğunu doğrula
+    cls_check = sb.table("classrooms").select("id").eq("id", classroom_id).eq("institution_id", current.institution_id).limit(1).execute()
+    if not cls_check.data:
+        return []
     res = (
         sb.table("attendance_records")
         .select("*")
