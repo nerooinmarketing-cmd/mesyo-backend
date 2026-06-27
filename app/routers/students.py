@@ -106,12 +106,87 @@ def create_student(body: StudentCreate, current: CurrentUser = Depends(require_i
     sb = get_supabase()
     data = body.model_dump(exclude_none=True)
     data["institution_id"] = current.institution_id
-    data.setdefault("status", "approved")  # manuel eklenen öğrenci direkt onaylı
+    data.setdefault("status", "approved")
     data["registration_source"] = "manual"
-    data["kvkk_consent"] = True  # manuel girişte yönetici zaten sorumlu
+    data["kvkk_consent"] = True
 
     res = sb.table("students").insert(data).execute()
     return res.data[0]
+
+
+class BulkStudentItem(BaseModel):
+    first_name: str
+    last_name: str
+    full_name: str | None = None
+    birth_date: str | None = None
+    gender: str = "kiz"
+    parent_name: str
+    parent_phone: str
+    tc_no: str | None = None
+    mahalle: str | None = None
+    classroom_id: str | None = None
+    season_id: str | None = None
+
+
+class BulkStudentCreate(BaseModel):
+    students: list[BulkStudentItem]
+    season_id: str | None = None
+
+
+@router.post("/bulk-import")
+def bulk_import_students(body: BulkStudentCreate, current: CurrentUser = Depends(require_institution)):
+    sb = get_supabase()
+    if not body.students:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Öğrenci listesi boş")
+    if len(body.students) > 200:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "En fazla 200 öğrenci yüklenebilir")
+
+    # Aktif sezonu bul
+    season_id = body.season_id
+    if not season_id:
+        active = sb.table("seasons").select("id").eq("institution_id", current.institution_id).eq("is_active", True).limit(1).execute()
+        if active.data:
+            season_id = active.data[0]["id"]
+
+    rows = []
+    errors = []
+    for i, s in enumerate(body.students):
+        if not s.first_name or not s.last_name or not s.parent_name or not s.parent_phone:
+            errors.append(f"Satır {i+2}: Ad, soyad, veli adı ve telefon zorunlu")
+            continue
+        if s.gender not in ("kiz", "erkek"):
+            errors.append(f"Satır {i+2}: Cinsiyet 'kiz' veya 'erkek' olmalı")
+            continue
+
+        row = {
+            "institution_id": current.institution_id,
+            "first_name": s.first_name.strip(),
+            "last_name": s.last_name.strip(),
+            "full_name": s.full_name or f"{s.first_name.strip()} {s.last_name.strip()}",
+            "gender": s.gender,
+            "parent_name": s.parent_name.strip(),
+            "parent_phone": s.parent_phone.strip(),
+            "status": "approved",
+            "registration_source": "excel",
+            "kvkk_consent": True,
+        }
+        if s.birth_date:
+            row["birth_date"] = s.birth_date
+        if s.tc_no:
+            row["tc_no"] = s.tc_no
+        if s.mahalle:
+            row["mahalle"] = s.mahalle
+        if s.classroom_id:
+            row["classroom_id"] = s.classroom_id
+        if season_id:
+            row["season_id"] = season_id
+        rows.append(row)
+
+    if errors:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, {"errors": errors})
+
+    res = sb.table("students").insert(rows).execute()
+    return {"detail": f"{len(res.data)} öğrenci eklendi", "count": len(res.data)}
 
 
 @router.patch("/{student_id}")
