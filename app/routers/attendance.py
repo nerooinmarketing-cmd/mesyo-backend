@@ -87,24 +87,28 @@ def dashboard_summary(start: str, end: str, current: CurrentUser = Depends(requi
 @router.get("/teacher-log")
 def teacher_log(start: str, end: str, current: CurrentUser = Depends(require_institution)):
     """Bir tarih aralığında, hangi öğretmenin hangi sınıfa hangi gün yoklama girdiğini özetler.
-    Her (classroom_id, date, marked_by) grubu için: kaç öğrenci işaretlendi, kaçı 'absent'.
-    Sınıf/öğretmen isimlerini ayrı sorgularla çekip Python'da birleştiriyoruz —
-    Supabase'in iç-içe foreign key disambiguation sentaksına bağımlı kalmamak için."""
+    Sadece bu kuruma ait sınıfların kayıtları döndürülür."""
     sb = get_supabase()
+
+    # Önce kuruma ait sınıf ID'lerini al
+    cls_res = sb.table("classrooms").select("id, name").eq("institution_id", current.institution_id).execute()
+    if not cls_res.data:
+        return []
+    cls_ids = [c["id"] for c in cls_res.data]
+    classroom_names = {c["id"]: c["name"] for c in cls_res.data}
+
+    # Sadece bu kurumun sınıflarına ait yoklama kayıtları
     res = (
         sb.table("attendance_records")
         .select("classroom_id, date, status, marked_by")
+        .in_("classroom_id", cls_ids)
         .gte("date", start).lte("date", end)
         .execute()
     )
     if not res.data:
         return []
 
-    classroom_ids = list({r["classroom_id"] for r in res.data})
     teacher_ids = list({r["marked_by"] for r in res.data if r["marked_by"]})
-
-    classrooms_res = sb.table("classrooms").select("id, name").in_("id", classroom_ids).execute()
-    classroom_names = {c["id"]: c["name"] for c in classrooms_res.data}
 
     teacher_names = {}
     if teacher_ids:
@@ -147,6 +151,10 @@ def get_by_date(classroom_id: str, date: str, current: CurrentUser = Depends(req
 @router.get("/report")
 def get_report(classroom_id: str, start: str, end: str, current: CurrentUser = Depends(require_institution)):
     sb = get_supabase()
+    # Sınıfın bu kuruma ait olduğunu doğrula
+    cls_check = sb.table("classrooms").select("id").eq("id", classroom_id).eq("institution_id", current.institution_id).limit(1).execute()
+    if not cls_check.data:
+        return []
     res = (
         sb.table("attendance_records")
         .select("*, students(first_name, last_name, parent_first_name, parent_last_name, parent_phone)")
